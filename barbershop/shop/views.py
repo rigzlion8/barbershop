@@ -1,8 +1,9 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from .models import Product, Order, OrderItem
 from django.conf import settings
 from .stripe_utils import create_checkout_session
+from django.db import transaction
 
 def product_list(request):
     products = Product.objects.all()
@@ -10,12 +11,22 @@ def product_list(request):
 
 @login_required
 def add_to_cart(request, product_id):
-    product = Product.objects.get(id=product_id)
-    order, created = Order.objects.get_or_create(user=request.user, is_completed=False)
-    order_item, created = OrderItem.objects.get_or_create(order=order, product=product)
-    if not created:
+    with transaction.atomic():
+        product = get_object_or_404(Product, id=product_id)
+        order, created = Order.objects.get_or_create(
+            user=request.user, 
+            is_completed=False,
+            defaults={'total': 0}  # Set initial total to 0 when creating
+        )
+        order_item, item_created = OrderItem.objects.get_or_create(
+            order=order, 
+            product=product,
+            defaults={'quantity': 0}
+        )
         order_item.quantity += 1
         order_item.save()
+        
+        order.update_total()
     return redirect('product_list')
 
 @login_required
